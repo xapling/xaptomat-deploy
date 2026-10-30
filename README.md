@@ -7,7 +7,8 @@ Wächter für das Ausrollen von [xapling/xaptomat](https://github.com/xapling/xa
 Ein Stand von `xaptomat` erreicht Azure nur, wenn er
 
 1. über einen gemergten Pull Request nach `main` kam und
-2. auf dem letzten Stand dieses Pull Requests von **Artur Kuksin** oder **Georg Dörgeloh** freigegeben wurde – nicht von der Person, die ihn gestellt hat.
+2. entweder von **Artur Kuksin** oder **Georg Dörgeloh** gemergt wurde (ihr Merge gilt als Freigabe)
+   oder auf dem letzten Stand von einem der beiden freigegeben wurde – nicht von der Person, die ihn gestellt hat.
 
 Direkte Pushes auf `main` in `xaptomat` landen zwar im Repo, werden aber nicht ausgerollt.
 
@@ -17,4 +18,4 @@ Im kostenlosen GitHub-Tarif lässt sich `main` in privaten Repos nicht schützen
 
 ## Änderungen
 
-Nur per Pull Request mit Freigabe durch eine der in [`CODEOWNERS`](.github/CODEOWNERS) genannten Personen. Einrichtung der Azure-Seite: `scripts/bootstrap-deploy-identity.sh` in `xaptomat`.
+Nur per Pull Request; mergen dürfen nur die in [`CODEOWNERS`](.github/CODEOWNERS) genannten Personen. Einrichtung der Azure-Seite: `scripts/bootstrap-deploy-identity.sh` in `xaptomat`.
