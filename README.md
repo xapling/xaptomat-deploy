@@ -13,7 +13,7 @@ Im kostenlosen GitHub-Tarif hat jedes Mitglied der Organisation Schreibrecht, un
 ## Die Lösung in einem Bild
 
 ```mermaid
-flowchart LR
+flowchart TD
     DEV["👩‍💻 Mitarbeitende<br/>ändern Code"] -->|Pull Request| PR["xaptomat<br/>Pull Request"]
     PR -->|Merge nach main| PIPE["xaptomat-Pipeline<br/>Tests"]
     PIPE -->|ruft auf| W{"🛡️ Wächter<br/>xaptomat-deploy"}
