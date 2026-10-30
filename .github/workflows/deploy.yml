@@ -1,0 +1,117 @@
+name: deploy
+
+# Wächter für xapling/xaptomat: rollt einen Stand nur dann nach Azure aus, wenn er über
+# einen Pull Request kam, den Artur Kuksin oder Georg Dörgeloh freigegeben haben – nicht
+# die Person, die ihn gestellt hat, und auf dem letzten Stand des Pull Requests.
+#
+# Die Deploy-Identität in Azure vertraut nur Tokens aus genau dieser Datei auf main
+# (OIDC-Claim job_workflow_ref). Wer die Pipeline in xaptomat ändert, kommt ohne diesen
+# Wächter nicht an Azure. Änderungen hier nur per Pull Request mit Freigabe (CODEOWNERS).
+
+on:
+  workflow_call:
+    inputs:
+      kind:
+        description: 'infra (Bicep) oder function (Code einer Function App)'
+        required: true
+        type: string
+      app-name:
+        required: false
+        type: string
+        default: ''
+      path:
+        required: false
+        type: string
+        default: ''
+
+env:
+  ALLOWED_REPO: xapling/xaptomat
+  REVIEWERS: arkuksin ghdoergeloh
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    concurrency: deploy-${{ inputs.kind }}-${{ inputs.app-name }}
+    permissions:
+      contents: read
+      pull-requests: read
+      id-token: write
+    steps:
+      - name: Eingaben prüfen
+        env:
+          KIND: ${{ inputs.kind }}
+          APP_NAME: ${{ inputs.app-name }}
+          APP_PATH: ${{ inputs.path }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REPOSITORY" == "$ALLOWED_REPO" ]] || { echo "::error::Nur $ALLOWED_REPO darf ausrollen."; exit 1; }
+          [[ "$GITHUB_REF" == "refs/heads/main" ]] || { echo "::error::Nur von main."; exit 1; }
+          case "$KIND" in
+            infra) ;;
+            function)
+              [[ "$APP_NAME" =~ ^func-xaptomat-[a-z0-9-]+$ ]] || { echo "::error::Ungültiger App-Name."; exit 1; }
+              [[ "$APP_PATH" =~ ^src/[a-z0-9-]+$ ]] || { echo "::error::Ungültiger Pfad."; exit 1; }
+              ;;
+            *) echo "::error::kind muss infra oder function sein."; exit 1 ;;
+          esac
+
+      - name: Freigabe prüfen
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          pr="$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" \
+            --jq "[.[] | select(.merged_at != null and .merge_commit_sha == \"$GITHUB_SHA\")] | first // empty")"
+          if [[ -z "$pr" ]]; then
+            echo "::error::$GITHUB_SHA kam nicht über einen gemergten Pull Request. Kein Ausrollen."
+            exit 1
+          fi
+          number="$(jq -r .number <<<"$pr")"
+          author="$(jq -r .user.login <<<"$pr")"
+          head="$(jq -r .head.sha <<<"$pr")"
+          approvers="$(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$number/reviews" \
+            --jq ".[] | select(.state == \"APPROVED\" and .commit_id == \"$head\" and .user.login != \"$author\") | .user.login")"
+          for reviewer in $REVIEWERS; do
+            if grep -qx "$reviewer" <<<"$approvers"; then
+              echo "Pull Request #$number von $author, freigegeben von $reviewer."
+              exit 0
+            fi
+          done
+          echo "::error::Pull Request #$number hat keine Freigabe von $REVIEWERS (ohne $author) auf dem letzten Stand."
+          exit 1
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: OIDC-Subject anzeigen
+        # Nur der Subject-Claim, nie das Token: hilft beim Abgleich mit dem Federated Credential.
+        run: |
+          token="$(curl -sS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=api://AzureADTokenExchange" | jq -r .value)"
+          python3 -c 'import sys,json,base64; p=sys.argv[1].split(".")[1]; print(json.loads(base64.urlsafe_b64decode(p+"="*(-len(p)%4)))["sub"])' "$token"
+
+      - uses: azure/login@7184910d9eb2b1c5e48f7073824a90609bb9b6d6 # v2.3.1
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Infrastruktur bereitstellen
+        if: inputs.kind == 'infra'
+        env:
+          RG: ${{ vars.AZURE_RESOURCE_GROUP }}
+          NAME: infra-${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          az deployment group what-if -g "$RG" -n "$NAME" --template-file infra/main.bicep --parameters @infra/main.parameters.json
+          az deployment group create -g "$RG" -n "$NAME" --template-file infra/main.bicep --parameters @infra/main.parameters.json \
+            --query "properties.outputs" -o json
+
+      - name: Function App bereitstellen
+        if: inputs.kind == 'function'
+        uses: Azure/functions-action@c5060b3b8bb1ebbcb531abd00c822ecbaa8ea656 # v1.5.7
+        with:
+          app-name: ${{ inputs.app-name }}
+          package: ${{ inputs.path }}
+          sku: flexconsumption
+          remote-build: true
