@@ -1,8 +1,10 @@
 name: deploy
 
 # Wächter für xapling/xaptomat: rollt einen Stand nur dann nach Azure aus, wenn er über
-# einen Pull Request kam, den Artur Kuksin oder Georg Dörgeloh freigegeben haben – nicht
-# die Person, die ihn gestellt hat, und auf dem letzten Stand des Pull Requests.
+# einen gemergten Pull Request kam und
+#   - Artur Kuksin oder Georg Dörgeloh ihn gemergt haben (ihr Merge gilt als Freigabe), oder
+#   - einer von beiden ihn auf dem letzten Stand freigegeben hat (nicht die Person, die ihn gestellt hat).
+# Direkte Pushes auf main werden nie ausgerollt.
 #
 # Die Deploy-Identität in Azure vertraut nur Tokens aus genau dieser Datei auf main
 # (OIDC-Claim job_workflow_ref). Wer die Pipeline in xaptomat ändert, kommt ohne diesen
@@ -70,6 +72,13 @@ jobs:
           number="$(jq -r .number <<<"$pr")"
           author="$(jq -r .user.login <<<"$pr")"
           head="$(jq -r .head.sha <<<"$pr")"
+          merged_by="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$number" --jq .merged_by.login)"
+          for reviewer in $REVIEWERS; do
+            if [[ "$merged_by" == "$reviewer" ]]; then
+              echo "Pull Request #$number von $author, gemergt von $reviewer."
+              exit 0
+            fi
+          done
           approvers="$(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$number/reviews" \
             --jq ".[] | select(.state == \"APPROVED\" and .commit_id == \"$head\" and .user.login != \"$author\") | .user.login")"
           for reviewer in $REVIEWERS; do
@@ -78,7 +87,7 @@ jobs:
               exit 0
             fi
           done
-          echo "::error::Pull Request #$number hat keine Freigabe von $REVIEWERS (ohne $author) auf dem letzten Stand."
+          echo "::error::Pull Request #$number wurde von $merged_by gemergt und hat keine Freigabe von $REVIEWERS (ohne $author) auf dem letzten Stand."
           exit 1
 
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
