@@ -8,7 +8,7 @@ name: deploy
 #
 # Die Deploy-Identität in Azure vertraut nur Tokens aus genau dieser Datei auf main
 # (OIDC-Claim job_workflow_ref). Wer die Pipeline in xaptomat ändert, kommt ohne diesen
-# Wächter nicht an Azure. Änderungen hier nur per Pull Request mit Freigabe (CODEOWNERS).
+# Wächter nicht an Azure. Änderungen hier nur per Pull Request; mergen nur Artur und Georg (CODEOWNERS).
 
 on:
   workflow_call:
